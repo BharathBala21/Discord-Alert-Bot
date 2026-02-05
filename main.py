@@ -9,6 +9,7 @@ USER_TOKEN = os.getenv("USER_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 KEYWORDS = os.getenv("KEYWORDS", "hello,wow").split(",")
 TARGET_CHANNEL_ID = int(os.getenv("TARGET_CHANNEL_ID", 0))
+NTFY_TOPIC = os.getenv("NTFY_TOPIC")
 
 class MyClient(discord.Client):
     async def on_ready(self):
@@ -17,7 +18,6 @@ class MyClient(discord.Client):
         if channel:
             print(f"✅ Success: Monitoring channel '#{channel.name}' in '{channel.guild.name}'")
         else:
-            print(f"❌ Error: Channel ID {TARGET_CHANNEL_ID} not found in cache.")
             try:
                 channel = await self.fetch_channel(TARGET_CHANNEL_ID)
                 print(f"✅ Success: Fetched channel '#{channel.name}' in '{channel.guild.name}'")
@@ -32,8 +32,11 @@ class MyClient(discord.Client):
         matched_keyword = next((kw for kw in KEYWORDS if kw.strip().lower() in content_lower), None)
         
         if matched_keyword:
-            print(f"✅ Match found for keyword '{matched_keyword}'! Message from {message.author}: '{message.content[:50]}'")
-            await self.send_to_webhook(message, matched_keyword.strip())
+            keyword = matched_keyword.strip()
+            print(f"✅ Match found for keyword '{keyword}'! Message from {message.author}: '{message.content[:50]}'")
+            await self.send_to_webhook(message, keyword)
+            if NTFY_TOPIC:
+                await self.send_to_ntfy(message, keyword)
 
     async def send_to_webhook(self, message, matched_keyword):
         guild_id = message.guild.id if message.guild else "@me"
@@ -49,9 +52,25 @@ class MyClient(discord.Client):
         async with aiohttp.ClientSession() as session:
             async with session.post(WEBHOOK_URL, json=payload) as response:
                 if response.status == 204:
-                    print(f"Alert sent successfully!")
+                    print(f"Discord Alert sent!")
                 else:
-                    print(f"Failed to send webhook: {response.status}")
+                    print(f"Discord Webhook Failed: {response.status}")
+
+    async def send_to_ntfy(self, message, matched_keyword):
+        ntfy_url = f"https://ntfy.sh/{NTFY_TOPIC}"
+        data = f"Keyword: {matched_keyword}\nUser: {message.author}\n\n{message.content}"
+        
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "Title": "🚨 Discord Alert!",
+                "Priority": "high",
+                "Tags": "loudspeaker,warning"
+            }
+            async with session.post(ntfy_url, data=data.encode('utf-8'), headers=headers) as response:
+                if response.status == 200:
+                    print(f"Ntfy Alert sent!")
+                else:
+                    print(f"Ntfy Failed: {response.status}")
 
 client = MyClient()
 client.run(USER_TOKEN)
